@@ -1,5 +1,6 @@
 *.blend
 *.blend1
-renders/
+__pycache__/
+renders/*
 !renders/preview_04.png
 diag_platform.py
