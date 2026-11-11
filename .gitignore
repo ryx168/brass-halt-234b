@@ -1,0 +1,5 @@
+*.blend
+*.blend1
+renders/
+!renders/preview_04.png
+diag_platform.py

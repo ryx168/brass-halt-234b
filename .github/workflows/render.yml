@@ -1,0 +1,139 @@
+name: render
+
+on:
+  push:
+    branches: [main]
+    paths: [build_station.py, .github/**]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: what to render
+        type: choice
+        options: [preview, still, anim, all]
+        default: all
+      res:
+        description: resolution percentage of 1920x1080
+        default: "100"
+      samples_still:
+        description: Cycles samples for the 1080p still
+        default: "320"
+      samples_anim:
+        description: Cycles samples per animation frame
+        default: "64"
+      chunks:
+        description: how many parallel jobs the 96 frames are split across
+        default: "24"
+
+permissions:
+  contents: write
+
+jobs:
+  preview:
+    if: github.event_name == 'push' || inputs.mode == 'preview' || inputs.mode == 'all'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/blender
+      - name: render half-res preview
+        run: ~/blender/blender -b -P build_station.py -- preview ci 2>&1 | grep -E "RENDERED|Error|Traceback|^Time"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview
+          path: renders/preview_ci.png
+
+  still:
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'still' || inputs.mode == 'all')
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/blender
+      - name: render the 1080p still
+        env:
+          STATION_RES: ${{ inputs.res }}
+          STATION_SAMPLES: ${{ inputs.samples_still }}
+        run: ~/blender/blender -b -P build_station.py -- final ci 2>&1 | grep -E "RENDERED|Error|Traceback|^Time|Sample [0-9]+/[0-9]+$" | awk 'NR % 20 == 0 || !/Sample/'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: still
+          path: renders/final_ci.png
+
+  plan:
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'anim' || inputs.mode == 'all')
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        run: |
+          python3 - "${{ inputs.chunks }}" <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, sys
+          n = int(sys.argv[1]); total = 96; per = -(-total // n)
+          items = [{"start": s, "end": min(total, s + per - 1)} for s in range(1, total + 1, per)]
+          print("matrix=" + json.dumps({"include": items}))
+          EOF
+
+  anim:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/blender
+      - name: render frames ${{ matrix.start }}-${{ matrix.end }}
+        env:
+          STATION_RES: ${{ inputs.res }}
+          STATION_SAMPLES: ${{ inputs.samples_anim }}
+          STATION_FRAMES: ${{ matrix.start }}-${{ matrix.end }}
+        run: ~/blender/blender -b -P build_station.py -- anim png ci 2>&1 | grep -E "RENDERED|Error|Traceback|FRAME RANGE|^Saved|^Time"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frames-${{ matrix.start }}
+          path: renders/fly_ci/f_*.png
+
+  encode:
+    needs: anim
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: frames-*
+          merge-multiple: true
+          path: frames
+      - name: assemble the MP4
+        run: |
+          ls frames | wc -l
+          ffmpeg -y -loglevel error -framerate 24 -i frames/f_%04d.png -c:v libx264 -pix_fmt yuv420p -crf 17 -movflags +faststart station_flythrough.mp4
+          ffprobe -v error -show_entries format=duration:stream=width,height -of csv=p=0 station_flythrough.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flythrough
+          path: station_flythrough.mp4
+
+  publish:
+    needs: [still, encode]
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && (needs.still.result == 'success' || needs.encode.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: still
+          path: out
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: flythrough
+          path: out
+        continue-on-error: true
+      - name: attach outputs to a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la out
+          tag="run-${{ github.run_number }}"
+          gh release create "$tag" out/* --repo "$GITHUB_REPOSITORY" --title "Render $tag" \
+            --notes "mode=${{ inputs.mode }} res=${{ inputs.res }}% still=${{ inputs.samples_still }}spp anim=${{ inputs.samples_anim }}spp chunks=${{ inputs.chunks }}"

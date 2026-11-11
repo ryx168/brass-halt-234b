@@ -1,0 +1,19 @@
+name: Set up Blender
+description: Download Blender 4.5.4 LTS (cached) and the libraries headless Cycles needs
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      with:
+        path: ~/blender
+        key: blender-4.5.4-linux-x64
+    - shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libxkbcommon0 libsm6 fonts-dejavu-core > /dev/null
+        if [ ! -x "$HOME/blender/blender" ]; then
+          mkdir -p "$HOME/blender"
+          curl -sSL https://download.blender.org/release/Blender4.5/blender-4.5.4-linux-x64.tar.xz | tar -xJ --strip-components=1 -C "$HOME/blender"
+        fi
+        "$HOME/blender/blender" --version | head -1
+        nproc
