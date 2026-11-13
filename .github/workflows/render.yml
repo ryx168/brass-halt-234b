@@ -106,6 +106,7 @@ jobs:
           path: frames
       - name: assemble the MP4
         run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
           ls frames | wc -l
           ffmpeg -y -loglevel error -framerate 24 -i frames/f_%04d.png -c:v libx264 -pix_fmt yuv420p -crf 17 -movflags +faststart station_flythrough.mp4
           ffprobe -v error -show_entries format=duration:stream=width,height -of csv=p=0 station_flythrough.mp4
