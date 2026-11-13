@@ -3,7 +3,7 @@ name: render
 on:
   push:
     branches: [main]
-    paths: [build_station.py, .github/**]
+    paths: [build_station.py, encode.sh, .github/**]
   workflow_dispatch:
     inputs:
       mode:
@@ -69,7 +69,7 @@ jobs:
         run: |
           python3 - "${{ inputs.chunks }}" <<'EOF' >> "$GITHUB_OUTPUT"
           import json, sys
-          n = int(sys.argv[1]); total = 96; per = -(-total // n)
+          n = int(sys.argv[1]); total = 264; per = -(-total // n)
           items = [{"start": s, "end": min(total, s + per - 1)} for s in range(1, total + 1, per)]
           print("matrix=" + json.dumps({"include": items}))
           EOF
@@ -99,21 +99,20 @@ jobs:
     needs: anim
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: frames-*
           merge-multiple: true
           path: frames
-      - name: assemble the MP4
+      - name: assemble the film (title card, three shots, crossfades)
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
-          ls frames | wc -l
-          ffmpeg -y -loglevel error -framerate 24 -i frames/f_%04d.png -c:v libx264 -pix_fmt yuv420p -crf 17 -movflags +faststart station_flythrough.mp4
-          ffprobe -v error -show_entries format=duration:stream=width,height -of csv=p=0 station_flythrough.mp4
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core > /dev/null
+          bash encode.sh frames station_film.mp4
       - uses: actions/upload-artifact@v4
         with:
-          name: flythrough
-          path: station_flythrough.mp4
+          name: film
+          path: station_film.mp4
 
   publish:
     needs: [still, encode]
@@ -127,7 +126,7 @@ jobs:
         continue-on-error: true
       - uses: actions/download-artifact@v4
         with:
-          name: flythrough
+          name: film
           path: out
         continue-on-error: true
       - name: attach outputs to a release

@@ -298,6 +298,8 @@ M = dict(
     lamp_shade=mat_simple('lamp_shade', (0.05,0.12,0.09,1), 0.35, 0.3), shade_in=mat_simple('shade_in', (0.95,0.93,0.85,1), 0.5),
     train=mat_train_paint(), window=mat_train_window(), gold=mat_simple('gold', (0.85,0.6,0.2,1), 0.3, 1.0),
     black=mat_simple('black_rubber', (0.02,0.02,0.02,1), 0.8), clock=mat_emission('clock_face', (1,0.97,0.9,1), 1.5),
+    skin=mat_simple('skin', (0.45,0.3,0.22,1), 0.6), amber=mat_emission('board_amber', (1.0,0.62,0.16,1), 5.0),
+    red_led=mat_emission('board_red', (1.0,0.12,0.06,1), 5.0), board=mat_simple('board_black', (0.01,0.01,0.012,1), 0.35),
     headlight=mat_emission('headlight', (1,0.95,0.85,1), 60), lantern=mat_emission('lantern', (1,0.75,0.45,1), 12),
     concrete=mat_simple('concrete_plain', (0.35,0.34,0.32,1), 0.8),
     cream=mat_simple('cream_paint', (0.85,0.78,0.6,1), 0.5),
@@ -426,7 +428,26 @@ def hang_sign(y, text, size, w):
     for sy, rz in ((-0.05, 0), (0.05, math.pi)):
         text_obj(f'sign_text_{y:.0f}_{sy}', text, (0, y+sy, 4.75), (math.radians(90), 0, rz), size, M['white_emit'], 0.004)
 
-hang_sign(lamp_ys[1], "KINGSBRIDGE", 0.36, 3.6)
+# departure board (amber text on black, both faces) instead of a plain name sign
+def departure_board(y):
+    W, H, ZC = 4.0, 1.5, 4.9
+    for sx in (-1, 1):
+        cyl(f'board_rod_{sx}', (sx*(W/2-0.25), y, ZC + H/2 + 0.4), 0.02, 0.8, M['iron_dark'])
+    b = box('board', (0, y, ZC), (W, 0.12, H), M['board']); bevel(b, 0.02, 2)
+    box('board_frame', (0, y, ZC), (W+0.08, 0.08, H+0.08), M['iron_dark'])
+    rows = [("17:42", "EDINBURGH WAVERLEY", "ON TIME"), ("17:55", "YORK", "ON TIME"),
+            ("18:10", "NEWCASTLE", "DELAYED"), ("18:24", "GLASGOW CENTRAL", "ON TIME"),
+            ("18:40", "LONDON KINGS CROSS", "BOARDING")]
+    for sy, rz, flip in ((-0.07, 0, 1), (0.07, math.pi, -1)):
+        rot = (math.radians(90), 0, rz)
+        text_obj(f'board_hdr_{sy}', "DEPARTURES", (0, y+sy, ZC + H/2 - 0.17), rot, 0.17, M['white_emit'], 0.003)
+        text_obj(f'board_hdr2_{sy}', "PLATFORM 3", (flip*(W/2-0.15), y+sy, ZC + H/2 - 0.17), rot, 0.12, M['white_emit'], 0.003, 'RIGHT' if flip > 0 else 'LEFT')
+        for i, (t, dest, st) in enumerate(rows):
+            z = ZC + H/2 - 0.46 - i*0.21
+            text_obj(f'board_t_{sy}_{i}', t, (flip*(-W/2+0.15), y+sy, z), rot, 0.15, M['amber'], 0.003, 'LEFT' if flip > 0 else 'RIGHT')
+            text_obj(f'board_d_{sy}_{i}', dest, (flip*(-W/2+0.85), y+sy, z), rot, 0.15, M['amber'], 0.003, 'LEFT' if flip > 0 else 'RIGHT')
+            text_obj(f'board_s_{sy}_{i}', st, (flip*(W/2-0.15), y+sy, z), rot, 0.13, M['red_led'] if st == 'DELAYED' else M['amber'], 0.003, 'RIGHT' if flip > 0 else 'LEFT')
+departure_board(lamp_ys[1])
 hang_sign(lamp_ys[3], "PLATFORM 3   -   WAY OUT", 0.26, 4.0)
 hang_sign(lamp_ys[5], "KINGSBRIDGE", 0.36, 3.6)
 hang_sign(lamp_ys[7], "TICKETS   -   TAXIS", 0.26, 3.4)
@@ -510,6 +531,41 @@ train_root = bpy.data.objects.new('train_root', None); coll.objects.link(train_r
 for ob in list(bpy.data.objects):
     if ob.name.startswith('car') and ob is not train_root: ob.parent = train_root
 
+# low steam drifting under the leading carriage (bounded volume, noise density, animated in anim mode)
+def mat_steam():
+    m, nt, out = mat_new('steam')
+    tc = node(nt, 'ShaderNodeTexCoord')
+    mp = node(nt, 'ShaderNodeMapping'); mp.inputs['Location'].default_value = (-1, -1, -1); mp.inputs['Scale'].default_value = (2, 2, 2)
+    nt.links.new(tc.outputs['Generated'], mp.inputs['Vector'])
+    grad = node(nt, 'ShaderNodeTexGradient', gradient_type='SPHERICAL'); nt.links.new(mp.outputs[0], grad.inputs['Vector'])
+    drift = node(nt, 'ShaderNodeMapping'); nt.links.new(tc.outputs['Object'], drift.inputs['Vector'])
+    n = noise(nt, drift.outputs[0], 1.1, 4, 0.6)
+    r = ramp(nt, n.outputs['Fac'], [(0.44, (0,0,0,1)), (0.72, (1,1,1,1))])
+    fall = math_node(nt, 'POWER', grad.outputs['Fac'], 1.6)
+    d = math_node(nt, 'MULTIPLY', math_node(nt, 'MULTIPLY', r.outputs['Color'], fall), 1.6)
+    pv = node(nt, 'ShaderNodeVolumePrincipled'); pv.inputs['Color'].default_value = (0.9, 0.9, 0.9, 1)
+    pv.inputs['Anisotropy'].default_value = 0.3; nt.links.new(d, pv.inputs['Density'])
+    nt.links.new(pv.outputs[0], out.inputs['Volume'])
+    return m, drift
+M['steam'], steam_drift = mat_steam()
+for i, yy in enumerate((9.0, 23.0)):
+    s = box(f'steam_{i}', (TX, yy, 0.95), (3.6, 5.0, 1.5), M['steam']); s.parent = train_root
+
+# waiting passengers: simple silhouettes, read as people in the fog
+def figure(name, x, y, h=1.75, coat=(0.05,0.05,0.07,1)):
+    s = h/1.75; mc = mat_simple(f'{name}_coat', coat, 0.75)
+    for sx in (-1, 1):
+        cyl(f'{name}_leg{sx}', (x + sx*0.1*s, y, PLAT_Z + 0.38*s), 0.09*s, 0.76*s, M['black'])
+    # long coat: wide at the hem, shoulders on top
+    cyl(f'{name}_torso', (x, y, PLAT_Z + 1.12*s), 0.26*s, 0.9*s, mc, r2=0.22*s)
+    sphere(f'{name}_head', (x, y, PLAT_Z + 1.66*s), 0.11*s, M['skin'])
+    cyl(f'{name}_hat', (x, y, PLAT_Z + 1.78*s), 0.13*s, 0.09*s, mc)
+    cyl(f'{name}_brim', (x, y, PLAT_Z + 1.74*s), 0.2*s, 0.015*s, mc)
+for i, (x, y, h, c) in enumerate([(-1.5, -4.5, 1.8, (0.08,0.06,0.05,1)), (1.3, -3.2, 1.65, (0.04,0.06,0.12,1)),
+                                  (0.1, -4.0, 1.72, (0.05,0.05,0.06,1)), (2.3, 24.0, 1.7, (0.1,0.08,0.06,1)),
+                                  (-2.4, 33.0, 1.78, (0.05,0.05,0.07,1)), (0.8, 52.0, 1.6, (0.12,0.05,0.05,1))]):
+    figure(f'fig{i}', x, y, h, c)
+
 # ----------------------------------------------------------------- lighting / world / camera
 world = bpy.data.worlds.new('World'); scene.world = world; world.use_nodes = True
 wn = world.node_tree; wn.nodes.clear()
@@ -580,16 +636,46 @@ ct.links.new(mul.outputs['Image'], comp.inputs['Image'])
 # ----------------------------------------------------------------- save + render
 os.makedirs(ROOT + '/renders', exist_ok=True)
 if "anim" in ARGS:
-    # 4 s dolly down the platform while the train pulls out
-    F0, F1 = 1, 96
-    scene.frame_start, scene.frame_end = F0, F1; scene.render.fps = 24
-    cam.location = (0.9, -17.0, 2.35); cam.rotation_euler = (math.radians(88), 0, math.radians(2.5)); cam.keyframe_insert('location', frame=F0); cam.keyframe_insert('rotation_euler', frame=F0)
-    cam.location = (0.5, -9.5, 2.2); cam.rotation_euler = (math.radians(88.5), 0, math.radians(0.5)); cam.keyframe_insert('location', frame=F1); cam.keyframe_insert('rotation_euler', frame=F1)
-    train_root.location = (0, 0, 0); train_root.keyframe_insert('location', frame=F0)
-    train_root.location = (0, 7.0, 0); train_root.keyframe_insert('location', frame=F1)
-    for ob in (cam, train_root):
+    # a three-shot film on one timeline; encode.sh adds the title card and crossfades
+    #   A  1-96   dolly down the platform (train waiting)
+    #   B  97-192 platform edge, the train pulls out through its own steam
+    #   C  193-264 tilt up from the waiting passengers to the departure board
+    SHOTS = [('A', 96), ('B', 96), ('C', 72)]
+    scene.render.fps = 24
+    f, bounds = 1, {}
+    for nm, n in SHOTS: bounds[nm] = (f, f + n - 1); f += n
+    F0, F1 = 1, f - 1
+    scene.frame_start, scene.frame_end = F0, F1
+    R = math.radians
+    def key(ob, frame, loc, rot):
+        ob.location = loc; ob.keyframe_insert('location', frame=frame)
+        ob.rotation_euler = rot; ob.keyframe_insert('rotation_euler', frame=frame)
+    def newcam(name, lens, focus, fstop=2.8):
+        cd = bpy.data.cameras.new(name); cd.lens = lens; cd.sensor_width = 36
+        cd.dof.use_dof = True; cd.dof.focus_distance = focus; cd.dof.aperture_fstop = fstop
+        ob = bpy.data.objects.new(name, cd); coll.objects.link(ob); return ob
+    a0, a1 = bounds['A']; camA = newcam('camA', 30, 16)
+    key(camA, a0, (0.9, -19.5, 2.35), (R(88), 0, R(2.5))); key(camA, a1, (0.5, -13.5, 2.2), (R(88.5), 0, R(0.5)))
+    b0, b1 = bounds['B']; camB = newcam('camB', 35, 7, 2.5)
+    # x=-3.5 keeps the camera off the column row at x=-2.9 (y=0 is a column)
+    key(camB, b0, (-3.5, -3.0, 2.3), (R(88), 0, R(10))); key(camB, b1, (-3.5, -1.6, 2.25), (R(88.5), 0, R(13)))
+    c0, c1 = bounds['C']; camC = newcam('camC', 35, 9, 3.2)
+    key(camC, c0, (0.9, 3.3, 1.55), (R(91), 0, R(180))); key(camC, c1, (0.9, 2.6, 1.6), (R(106), 0, R(180)))
+    for nm, cam_ob in (('A', camA), ('B', camB), ('C', camC)):
+        mk = scene.timeline_markers.new(nm, frame=bounds[nm][0]); mk.camera = cam_ob
+    scene.camera = camA
+    for ob in (camA, camB, camC):
         for fc in ob.animation_data.action.fcurves:
             for kp in fc.keyframe_points: kp.interpolation = 'LINEAR'
+    # the train stands still until shot B, then accelerates away (ease-in only)
+    train_root.location = (0, 0, 0); train_root.keyframe_insert('location', frame=b0)
+    train_root.location = (0, 12.0, 0); train_root.keyframe_insert('location', frame=b1)
+    for fc in train_root.animation_data.action.fcurves:
+        fc.keyframe_points[0].interpolation = 'QUAD'; fc.keyframe_points[0].easing = 'EASE_IN'
+    loc = steam_drift.inputs['Location']
+    loc.default_value = (0, 0, 0); loc.keyframe_insert('default_value', frame=F0)
+    loc.default_value = (0.4, -2.5, 1.2); loc.keyframe_insert('default_value', frame=F1)
+    print('SHOTS', bounds, 'TOTAL', F1)
     scene.render.resolution_percentage = 50; scene.cycles.samples = 40
     if 'png' in ARGS:
         # PNG frame sequence: survives a killed run; assemble with ffmpeg afterwards

@@ -13,9 +13,19 @@ No Tripo, no image-generated textures, no GPU.
 `.github/workflows/render.yml` renders in the cloud so no workstation has to stay busy:
 
 - every push to `main` renders a half-res preview (smoke test, artifact `preview`)
-- `Run workflow` (workflow_dispatch) renders the 1080p still and the 96-frame fly-through;
-  the frames are split across N parallel jobs (default 24 x 4 frames), stitched with ffmpeg,
-  and the MP4 + PNG are attached to a release tagged `run-<number>`
+- `Run workflow` (workflow_dispatch) renders the 1080p still and a 264-frame, three-shot film;
+  the frames are split across N parallel jobs (default 24 x 11 frames), then `encode.sh`
+  adds a title card, crossfades the shots and fades out; the MP4 + PNG are attached to a
+  release tagged `run-<number>`
+
+The film (12 s at 24 fps):
+
+| shot | frames | what happens |
+|------|--------|--------------|
+| title | - | "KINGSBRIDGE CENTRAL - a station built entirely by code" on black |
+| A | 1-96 | slow dolly down the platform, the train waiting |
+| B | 97-192 | from the platform edge, the train pulls out through its own low steam |
+| C | 193-264 | tilt up from three waiting passengers to the amber departure board |
 
 Blender 4.5.4 LTS is downloaded from blender.org on first use and cached. Inputs: `mode`
 (preview / still / anim / all), `res` (%), `samples_still`, `samples_anim`, `chunks`.
