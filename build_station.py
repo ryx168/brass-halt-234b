@@ -441,12 +441,13 @@ def departure_board(y):
     for sy, rz, flip in ((-0.07, 0, 1), (0.07, math.pi, -1)):
         rot = (math.radians(90), 0, rz)
         text_obj(f'board_hdr_{sy}', "DEPARTURES", (0, y+sy, ZC + H/2 - 0.17), rot, 0.17, M['white_emit'], 0.003)
-        text_obj(f'board_hdr2_{sy}', "PLATFORM 3", (flip*(W/2-0.15), y+sy, ZC + H/2 - 0.17), rot, 0.12, M['white_emit'], 0.003, 'RIGHT' if flip > 0 else 'LEFT')
+        # alignment is in the text's own frame, which the 180-degree rotation already mirrors: never swap it
+        text_obj(f'board_hdr2_{sy}', "PLATFORM 3", (flip*(W/2-0.15), y+sy, ZC + H/2 - 0.17), rot, 0.12, M['white_emit'], 0.003, 'RIGHT')
         for i, (t, dest, st) in enumerate(rows):
             z = ZC + H/2 - 0.46 - i*0.21
-            text_obj(f'board_t_{sy}_{i}', t, (flip*(-W/2+0.15), y+sy, z), rot, 0.15, M['amber'], 0.003, 'LEFT' if flip > 0 else 'RIGHT')
-            text_obj(f'board_d_{sy}_{i}', dest, (flip*(-W/2+0.85), y+sy, z), rot, 0.15, M['amber'], 0.003, 'LEFT' if flip > 0 else 'RIGHT')
-            text_obj(f'board_s_{sy}_{i}', st, (flip*(W/2-0.15), y+sy, z), rot, 0.13, M['red_led'] if st == 'DELAYED' else M['amber'], 0.003, 'RIGHT' if flip > 0 else 'LEFT')
+            text_obj(f'board_t_{sy}_{i}', t, (flip*(-W/2+0.15), y+sy, z), rot, 0.15, M['amber'], 0.003, 'LEFT')
+            text_obj(f'board_d_{sy}_{i}', dest, (flip*(-W/2+0.85), y+sy, z), rot, 0.15, M['amber'], 0.003, 'LEFT')
+            text_obj(f'board_s_{sy}_{i}', st, (flip*(W/2-0.15), y+sy, z), rot, 0.13, M['red_led'] if st == 'DELAYED' else M['amber'], 0.003, 'RIGHT')
 departure_board(lamp_ys[1])
 hang_sign(lamp_ys[3], "PLATFORM 3   -   WAY OUT", 0.26, 4.0)
 hang_sign(lamp_ys[5], "KINGSBRIDGE", 0.36, 3.6)
