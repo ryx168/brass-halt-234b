@@ -28,7 +28,16 @@ The film (12 s at 24 fps):
 | C | 193-264 | tilt up from three waiting passengers to the amber departure board |
 
 Blender 4.5.4 LTS is downloaded from blender.org on first use and cached. Inputs: `mode`
-(preview / still / anim / all), `res` (%), `samples_still`, `samples_anim`, `chunks`.
+(preview / still / anim / all), `res` (%), `samples_still`, `samples_anim`, `chunks`,
+`frames` (range to render, default `1-264`) and `reuse_run` (an earlier run id whose
+frame artifacts fill everything outside that range). Fixing one shot therefore costs
+one shot's render time, not the whole film's:
+
+```
+gh workflow run render.yml -R ryx168/brass-halt-234b -f mode=anim -f frames=193-264 -f chunks=18 -f reuse_run=<earlier run id>
+```
+
+Frame artifacts expire after 90 days, so `reuse_run` must point at a recent run.
 
 Environment overrides the script understands: `STATION_ROOT`, `STATION_RES`,
 `STATION_SAMPLES`, `STATION_FRAMES=a-b`.
