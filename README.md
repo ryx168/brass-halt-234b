@@ -8,7 +8,19 @@ No Tripo, no image-generated textures, no GPU.
 
 ![preview](renders/preview_04.png)
 
+## Second scene: a London terminus
+
+`build_london.py` builds a St Pancras-style Barlow trainshed at dusk: one pointed Gothic
+arch (73 m span, 30 m rise, two circular arcs whose centres sit below the springing line),
+sky-blue lattice ribs every 9 m, a glazed roof whose shader lets shadow rays through so the
+low sun still reaches the platforms, a glazed end screen with the great clock (ten to seven),
+six tracks with buffer stops, wedge-nosed HST power cars, an electric unit, a departures
+board, a K6 telephone kiosk and a pillar box. Its film has two shots: a dolly down the
+middle island, then a tilt from the concourse up to the roof and the clock.
+
 ## Rendering on GitHub Actions
+
+Pick the scene with the `scene` input (`station` or `london`); a push smoke-tests both.
 
 `.github/workflows/render.yml` renders in the cloud so no workstation has to stay busy:
 
