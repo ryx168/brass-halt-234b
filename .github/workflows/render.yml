@@ -3,9 +3,14 @@ name: render
 on:
   push:
     branches: [main]
-    paths: [build_station.py, encode.sh, .github/**]
+    paths: [build_station.py, build_london.py, encode.sh, .github/**]
   workflow_dispatch:
     inputs:
+      scene:
+        description: which scene
+        type: choice
+        options: [station, london]
+        default: station
       mode:
         description: what to render
         type: choice
@@ -24,30 +29,49 @@ on:
         description: how many parallel jobs the frame range is split across
         default: "24"
       frames:
-        description: frame range to render, e.g. 193-264 to redo only shot C
-        default: "1-264"
+        description: frame range to render, e.g. 193-264 to redo one shot (blank = the whole film)
+        default: ""
       reuse_run:
-        description: run id whose frames fill everything outside the range (blank = render all)
+        description: run id (same scene) whose frames fill everything outside the range (blank = render all)
         default: ""
 
 permissions:
   contents: write
   actions: read
 
+# per-scene settings; a push has no inputs and falls through to the station values
+env:
+  SCRIPT: ${{ inputs.scene == 'london' && 'build_london.py' || 'build_station.py' }}
+  PREFIX: ${{ inputs.scene == 'london' && 'london_' || '' }}
+  TOTAL: ${{ inputs.scene == 'london' && '168' || '264' }}
+  SHOTS: ${{ inputs.scene == 'london' && '96,72' || '96,96,72' }}
+  TITLE: ${{ inputs.scene == 'london' && 'LONDON ST PANCRAS' || 'KINGSBRIDGE CENTRAL' }}
+  SUBTITLE: ${{ inputs.scene == 'london' && 'a London terminus built entirely by code' || 'a station built entirely by code' }}
+  FILM: ${{ inputs.scene == 'london' && 'london_film.mp4' || 'station_film.mp4' }}
+
 jobs:
   preview:
     if: github.event_name == 'push' || inputs.mode == 'preview' || inputs.mode == 'all'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        scene: ${{ fromJSON(github.event_name == 'push' && '["station","london"]' || format('["{0}"]', inputs.scene)) }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/blender
-      - name: render half-res preview
-        run: ~/blender/blender -b -P build_station.py -- preview ci 2>&1 | grep -E "RENDERED|Error|Traceback|^Time"
+      - name: render half-res preview of ${{ matrix.scene }}
+        run: |
+          s=build_station.py; p=""
+          if [ "${{ matrix.scene }}" = london ]; then s=build_london.py; p=london_; fi
+          ~/blender/blender -b -P $s -- preview ci 2>&1 | grep -E "RENDERED|Error|Traceback|^Time"
+          test -f renders/${p}preview_ci.png
+          echo "OUT=renders/${p}preview_ci.png" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:
-          name: preview
-          path: renders/preview_ci.png
+          name: preview-${{ matrix.scene }}
+          path: ${{ env.OUT }}
 
   still:
     if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'still' || inputs.mode == 'all')
@@ -60,11 +84,13 @@ jobs:
         env:
           STATION_RES: ${{ inputs.res }}
           STATION_SAMPLES: ${{ inputs.samples_still }}
-        run: ~/blender/blender -b -P build_station.py -- final ci 2>&1 | grep -E "RENDERED|Error|Traceback|^Time|Sample [0-9]+/[0-9]+$" | awk 'NR % 20 == 0 || !/Sample/'
+        run: |
+          ~/blender/blender -b -P $SCRIPT -- final ci 2>&1 | grep -E "RENDERED|Error|Traceback|^Time|Sample [0-9]+/[0-9]+$" | awk 'NR % 20 == 0 || !/Sample/'
+          test -f renders/${PREFIX}final_ci.png
       - uses: actions/upload-artifact@v4
         with:
           name: still
-          path: renders/final_ci.png
+          path: renders/${{ env.PREFIX }}final_ci.png
 
   plan:
     if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'anim' || inputs.mode == 'all')
@@ -74,7 +100,8 @@ jobs:
     steps:
       - id: m
         run: |
-          python3 - "${{ inputs.chunks }}" "${{ inputs.frames }}" <<'EOF' >> "$GITHUB_OUTPUT"
+          range="${{ inputs.frames }}"; [ -n "$range" ] || range="1-$TOTAL"
+          python3 - "${{ inputs.chunks }}" "$range" <<'EOF' >> "$GITHUB_OUTPUT"
           import json, sys
           n = int(sys.argv[1]); a, b = map(int, sys.argv[2].split('-'))
           per = -(-(b - a + 1) // n)
@@ -97,11 +124,11 @@ jobs:
           STATION_RES: ${{ inputs.res }}
           STATION_SAMPLES: ${{ inputs.samples_anim }}
           STATION_FRAMES: ${{ matrix.start }}-${{ matrix.end }}
-        run: ~/blender/blender -b -P build_station.py -- anim png ci 2>&1 | grep -E "RENDERED|Error|Traceback|FRAME RANGE|^Saved|^Time"
+        run: ~/blender/blender -b -P $SCRIPT -- anim png ci 2>&1 | grep -E "RENDERED|Error|Traceback|FRAME RANGE|^Saved|^Time"
       - uses: actions/upload-artifact@v4
         with:
           name: frames-${{ matrix.start }}
-          path: renders/fly_ci/f_*.png
+          path: renders/${{ env.PREFIX }}fly_ci/f_*.png
 
   encode:
     needs: anim
@@ -121,17 +148,17 @@ jobs:
           pattern: frames-*
           merge-multiple: true
           path: new
-      - name: assemble the film (title card, three shots, crossfades)
+      - name: assemble the film (title card, shots, crossfades)
         run: |
           mkdir -p frames && cp -f new/f_*.png frames/
-          echo "new: $(ls new | wc -l)  total: $(ls frames | wc -l)"
-          [ "$(ls frames/f_*.png | wc -l)" -eq 264 ] || { echo "expected 264 frames"; exit 1; }
+          echo "new: $(ls new | wc -l)  total: $(ls frames | wc -l)  expected: $TOTAL"
+          [ "$(ls frames/f_*.png | wc -l)" -eq "$TOTAL" ] || { echo "expected $TOTAL frames"; exit 1; }
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core > /dev/null
-          bash encode.sh frames station_film.mp4
+          bash encode.sh frames "$FILM"
       - uses: actions/upload-artifact@v4
         with:
           name: film
-          path: station_film.mp4
+          path: ${{ env.FILM }}
 
   publish:
     needs: [still, encode]
@@ -154,5 +181,5 @@ jobs:
         run: |
           ls -la out
           tag="run-${{ github.run_number }}"
-          gh release create "$tag" out/* --repo "$GITHUB_REPOSITORY" --title "Render $tag" \
-            --notes "mode=${{ inputs.mode }} res=${{ inputs.res }}% still=${{ inputs.samples_still }}spp anim=${{ inputs.samples_anim }}spp chunks=${{ inputs.chunks }} frames=${{ inputs.frames }} reuse_run=${{ inputs.reuse_run }}"
+          gh release create "$tag" out/* --repo "$GITHUB_REPOSITORY" --title "Render $tag (${{ inputs.scene }})" \
+            --notes "scene=${{ inputs.scene }} mode=${{ inputs.mode }} res=${{ inputs.res }}% still=${{ inputs.samples_still }}spp anim=${{ inputs.samples_anim }}spp chunks=${{ inputs.chunks }} frames=${{ inputs.frames }} reuse_run=${{ inputs.reuse_run }}"
